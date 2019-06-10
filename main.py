@@ -1,10 +1,8 @@
 from requests_html import HTML
 from string import ascii_uppercase
-import copy
 import json
 from tqdm import tqdm
 import grequests
-import utils
 
 
 BASE_LINK = 'http://www.howstat.com/cricket/Statistics/Players/PlayerList.asp?Country=ALL&Group'
@@ -13,15 +11,27 @@ ALL_YEARS = {}
 BATCH_SIZE = 200
 
 
-def get_player_match_data(session, player_code):
-    player_data = session.get(f'{PLAYER_ODI_LINK}?{player_code}').html
+def divide_list(l, n):
+    for i in range(0, len(l), n):  
+        yield l[i:i + n]
+
+
+def get_player_match_data(player_html):
+    player_data = HTML(html=player_html)
+    player_metadata = player_data.find('table')[4].find('tr')[1].find('td')[0].text.strip().split('(')
+    player_name = player_metadata[0].strip()
+    player_country = player_metadata[1].split(')')[0].strip()
     player_data_table = player_data.find('table')[5]
-    player_match_years = player_data_table.find('tr')[2:-1]
+    player_match_years = player_data_table.find('tr')[3:-3]
+    player_batting_data_years = player_match_years[:len(player_match_years) // 2 - 1]
     player_cummulative_runs = 0
     player_cummulative_matches = 0
-    player_all_years_data = []
-
-    for year in player_match_years:
+    player_data = {}
+    
+    player_data['player_name'] = player_name
+    player_data['player_country'] = player_country
+    player_data['all_years_data'] = []
+    for year in player_batting_data_years:
         year_dict = {}
         year_data = year.find('td')
         year_dict['year'] = int(year_data[0].text.strip())
@@ -32,16 +42,22 @@ def get_player_match_data(session, player_code):
         player_cummulative_runs += year_dict['year_runs']
         year_dict['year_runs_cummulative'] = player_cummulative_runs
         
-        player_all_years_data.append(year_dict)
+        player_data['all_years_data'].append(year_dict)
     
-    return player_all_years_data
+    return player_data
 
 
-def get_players(session):
+def get_players():
     all_players = []
-    for x in tqdm(ascii_uppercase):
-        player_list = session.get(f'{BASE_LINK}={x}').html
-        player_table = player_list.find('table')[4].find('table')[2]
+    received_all_bool = False
+    while not received_all_bool:
+        player_list = (grequests.get(f'{BASE_LINK}={x}') for x in ascii_uppercase)
+        player_list = grequests.map(player_list)
+        received_all_bool =  all([bool(x.status_code==200) for x in player_list])
+    
+    for player_response in tqdm(player_list):
+        player_data = HTML(html=player_response.text)
+        player_table = player_data.find('table')[7]
         player_trs = player_table.find('tr')[2:-1]
         for tr in player_trs:
             player_tds = tr.find('td')
@@ -55,23 +71,23 @@ def get_players(session):
 
 
 def main():
-    session = HTML()
     print('Collecting all players who have ever played ODI matches')
-    all_players = get_players(session)
-    print(f'Number of players found: {len(all_players)}')
+    all_players = get_players()
+    print(f'Number of players found: {len(all_players)}')   
     all_players_data = []
-    print('Processing individual player data')
+    print(f'Processing individual player data in batches of: {BATCH_SIZE}')
     with tqdm(total=len(all_players)) as progress_bar:
-        for batch in utils.divide_list(all_players):
-            player_data_responses = (grequests.get(f'{PLAYER_ODI_LINK}?{player_code}') for player_code in batch)
-            player = all_players.pop(0)
-            player_final = copy.deepcopy(player)  # Necessary as it's probably a bad practice to edit the same dict while iterating through it
-            del player_final['player_code']
-            # This stores a lot of data in the memory at runtime, but it's a tradeoff,
-            # considering the data isn't big enough to need to put on disk and it increases overall speed
-            player_final['player_data'] = get_player_match_data(session, player['player_code'])
-            all_players_data.append(player_final)
-            progress_bar.update(1)
+        for batch in divide_list(all_players, BATCH_SIZE):
+            received_all_bool = False
+            while not received_all_bool:
+                player_data_responses = (grequests.get(f'{PLAYER_ODI_LINK}?{player_code}') for player_code in batch)
+                player_data_responses = grequests.map(player_data_responses)
+                received_all_bool =  all([bool(x.status_code==200) for x in player_data_responses])
+                # This stores a lot of data in the memory at runtime, but it's a tradeoff,
+                # considering the data isn't big enough to need to put on disk and doing that increases overall speed
+                for response in player_data_responses:
+                    all_players_data.append(get_player_match_data(response.text))
+                    progress_bar.update(1)
     print('Dumping JSON to disk')
     with open('all_player_data.json', 'w') as player_data_file:
         player_data_file.write(json.dumps(all_players_data, indent=4))
