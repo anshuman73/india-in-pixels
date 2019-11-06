@@ -1,6 +1,6 @@
 ## Cricket Player history data scraper
 
-Scraper designed to get data about cricket players efficiently. Written as a part of a coding challenge for an (internship)[https://www.youtube.com/watch?v=9QzjQwgPcgQ].
+Scraper designed to get data about cricket players efficiently. Written as a part of a coding challenge for an [internship](https://www.youtube.com/watch?v=9QzjQwgPcgQ)
 
 
 ### What I had to do
