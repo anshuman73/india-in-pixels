@@ -3,11 +3,12 @@ from string import ascii_uppercase
 import json
 from tqdm import tqdm
 import grequests
+from copy import deepcopy
 
 
 BASE_LINK = 'http://www.howstat.com/cricket/Statistics/Players/PlayerList.asp?Country=ALL&Group'
 PLAYER_ODI_LINK = 'http://www.howstat.com/cricket/Statistics/Players/PlayerYears_ODI.asp'
-ALL_YEARS = {}
+ALL_YEARS_DATA = {}
 BATCH_SIZE = 200
 
 
@@ -41,8 +42,16 @@ def get_player_match_data(player_html):
         year_dict['year_runs'] = int(year_data[8].text.strip())
         player_cummulative_runs += year_dict['year_runs']
         year_dict['year_runs_cummulative'] = player_cummulative_runs
-        
         player_data['all_years_data'].append(year_dict)
+        year_dict_copy = deepcopy(year_dict)
+        year = int(year_dict_copy['year'])
+        del year_dict_copy['year']
+        year_dict_copy['player_name'] = player_name
+        year_dict_copy['player_country'] = player_country
+        if year in ALL_YEARS_DATA:
+            ALL_YEARS_DATA[year].append(year_dict_copy)
+        else:
+            ALL_YEARS_DATA[year] = [year_dict_copy]
     
     return player_data
 
@@ -91,6 +100,8 @@ def main():
     print('Dumping JSON to disk')
     with open('all_player_data.json', 'w') as player_data_file:
         player_data_file.write(json.dumps(all_players_data, indent=4))
+    with open('all_year_data.json', 'w') as player_data_file:
+        player_data_file.write(json.dumps(ALL_YEARS_DATA, indent=4, sort_keys=True))
     print('All done!')
 
 main()
